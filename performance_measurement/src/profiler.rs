@@ -1,7 +1,5 @@
-use std::collections::HashMap;
-use std::sync::Mutex;
+use std::f64;
 use std::time::{Duration, Instant};
-use std::{cmp, f64};
 
 use derive_more::Display;
 use lazy_static::lazy_static;
@@ -38,7 +36,7 @@ pub struct PerformanceProfiler;
 
 impl PerformanceProfiler {
     pub fn store_measurement(function_name: &'static str, duration: Duration) {
-        let mut global_performance_measurements = &GLOBAL_PERFORMANCE_MEASUREMENTS;
+        let global_performance_measurements = &GLOBAL_PERFORMANCE_MEASUREMENTS;
 
         let duration_ms = duration.as_nanos() as f64 / 1_000_000.0;
 

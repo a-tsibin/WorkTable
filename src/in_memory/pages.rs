@@ -23,7 +23,7 @@ where
 
     /// Stack with empty [`Link`]s. It stores [`Link`]s of rows that was deleted.
     empty_links: Stack<Link>,
-
+    // dirty_page_ids: Stack<u32>,
     /// Count of saved rows.
     row_count: AtomicU64,
 
@@ -68,16 +68,14 @@ where
                     DataExecutionError::InvalidLink => {
                         self.empty_links.push(link);
                         self.retry_insert(general_row)
-                    },
-                    DataExecutionError::PageIsFull { .. } |
-                    DataExecutionError::SerializeError |
-                    DataExecutionError::DeserializeError => {
-                        Err(e.into())
                     }
+                    DataExecutionError::PageIsFull { .. }
+                    | DataExecutionError::SerializeError
+                    | DataExecutionError::DeserializeError => Err(e.into()),
                 }
             } else {
                 Ok(link)
-            }
+            };
         }
 
         let (link, tried_page) = {
@@ -167,13 +165,15 @@ where
     pub fn with_ref<Op, Res>(&self, link: Link, op: Op) -> Result<Res, ExecutionError>
     where
         Row: Archive,
-        Op: Fn(&<<Row as StorableRow>::WrappedRow as Archive>::Archived) -> Res
+        Op: Fn(&<<Row as StorableRow>::WrappedRow as Archive>::Archived) -> Res,
     {
         let pages = self.pages.read().unwrap();
         let page = pages
             .get::<usize>(link.page_id.into())
             .ok_or(ExecutionError::PageNotFound(link.page_id))?;
-        let gen_row = page.get_row_ref(link).map_err(ExecutionError::DataPageError)?;
+        let gen_row = page
+            .get_row_ref(link)
+            .map_err(ExecutionError::DataPageError)?;
         let res = op(gen_row);
         Ok(res)
     }
@@ -182,16 +182,21 @@ where
         feature = "perf_measurements",
         performance_measurement(prefix_name = "DataPages")
     )]
-    pub unsafe fn with_mut_ref<Op, Res>(&self, link: Link, mut op: Op) -> Result<Res, ExecutionError>
+    pub unsafe fn with_mut_ref<Op, Res>(
+        &self,
+        link: Link,
+        mut op: Op,
+    ) -> Result<Res, ExecutionError>
     where
         Row: Archive,
-        Op: FnMut(&mut <<Row as StorableRow>::WrappedRow as Archive>::Archived) -> Res
+        Op: FnMut(&mut <<Row as StorableRow>::WrappedRow as Archive>::Archived) -> Res,
     {
         let pages = self.pages.read().unwrap();
         let page = pages
             .get::<usize>(link.page_id.into())
             .ok_or(ExecutionError::PageNotFound(link.page_id))?;
-        let gen_row = page.get_mut_row_ref(link)
+        let gen_row = page
+            .get_mut_row_ref(link)
             .map_err(ExecutionError::DataPageError)?
             .get_unchecked_mut();
         let res = op(gen_row);
@@ -228,7 +233,7 @@ pub enum ExecutionError {
 
     PageNotFound(#[error(not(source))] page::Id),
 
-    Locked
+    Locked,
 }
 
 #[cfg(test)]

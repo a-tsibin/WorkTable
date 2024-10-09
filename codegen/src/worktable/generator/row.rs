@@ -19,11 +19,15 @@ impl Generator {
                 self.#pk_field.clone().into()
             }
         } else {
-            let vals = pk.vals.keys().map(|i| {
-                quote! {
-                    self.#i.clone()
-                }
-            }).collect::<Vec<_>>();
+            let vals = pk
+                .vals
+                .keys()
+                .map(|i| {
+                    quote! {
+                        self.#i.clone()
+                    }
+                })
+                .collect::<Vec<_>>();
             quote! {
                 (#(#vals),*).into()
             }
@@ -88,5 +92,6 @@ mod tests {
 
         assert_eq!(generator.row_name.unwrap().to_string(), "TestRow");
         assert_eq!(row_def.to_string(), "TestRow");
+        drop(pk);
     }
 }

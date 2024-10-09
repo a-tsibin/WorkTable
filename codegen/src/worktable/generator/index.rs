@@ -72,7 +72,9 @@ impl Generator {
                 }
             }).collect::<Vec<_>>();
 
-        let delete_rows = self.columns.indexes
+        let delete_rows = self
+            .columns
+            .indexes
             .iter()
             .map(|(i, idx)| {
                 let index_field_name = &idx.name;
@@ -88,7 +90,8 @@ impl Generator {
                         }
                     }
                 }
-            }).collect::<Vec<_>>();
+            })
+            .collect::<Vec<_>>();
 
         let row_type_name = self.row_name.as_ref().unwrap();
         let index_type_name = self.index_name.as_ref().unwrap();
@@ -168,7 +171,7 @@ mod tests {
         let ident = Ident::new("Test", Span::call_site());
         let mut generator = Generator::new(ident, columns);
         generator.gen_type_def();
-        generator.gen_pk_def();
+        generator.gen_pk_def().unwrap();
         generator.gen_row_def();
 
         let res = generator.gen_impl_def();

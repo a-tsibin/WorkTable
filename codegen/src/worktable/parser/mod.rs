@@ -1,6 +1,6 @@
+mod attribute;
 mod columns;
 mod index;
-mod name;
 mod punct;
 pub mod queries;
 

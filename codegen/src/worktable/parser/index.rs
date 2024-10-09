@@ -138,5 +138,6 @@ mod tests {
 
         assert!(columns.is_ok());
         let columns = columns.unwrap();
+        drop(columns);
     }
 }

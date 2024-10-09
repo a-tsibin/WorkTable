@@ -21,7 +21,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
     let fn_sig = &input_fn.sig;
     let fn_vis = &input_fn.vis;
 
-    let mut attr = parse_attr(attr)?;
+    let attr = parse_attr(attr)?;
 
     let mut test_sig = input_fn.sig.clone();
     test_sig.ident = Ident::new(format!("__{}", test_sig.ident).as_str(), item.span());

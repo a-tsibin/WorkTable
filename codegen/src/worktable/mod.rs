@@ -1,5 +1,7 @@
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
+use std::collections::HashMap;
+pub type Attributes = HashMap<String, String>;
 
 mod generator;
 mod model;
@@ -14,17 +16,21 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
     let mut queries = None;
     let mut indexes = None;
 
-    let name = parser.parse_name()?;
+    let mut attributes = parser.parse_attributes()?;
+    let name = attributes.remove("name").ok_or(syn::Error::new(
+        proc_macro2::Span::call_site(),
+        "Expected `name` field in declaration",
+    ))?;
     while let Some(ident) = parser.peek_next() {
         match ident.to_string().as_str() {
             "columns" => {
                 let res = parser.parse_columns()?;
                 columns = Some(res)
-            },
+            }
             "indexes" => {
                 let res = parser.parse_indexes()?;
                 indexes = Some(res);
-            },
+            }
             "queries" => {
                 let res = parser.parse_queries()?;
                 queries = Some(res)
@@ -37,8 +43,9 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
     if let Some(i) = indexes {
         columns.indexes = i
     }
-    let mut generator = Generator::new(name, columns);
+    let mut generator = Generator::new(format_ident!("{}", name), columns);
     generator.queries = queries;
+    generator.attributes = attributes;
 
     let pk_def = generator.gen_pk_def()?;
     let row_def = generator.gen_row_def();
@@ -78,15 +85,15 @@ mod test {
     fn test() {
         let tokens = quote! {
             name: Test,
-        columns: {
-            id: u64 primary_key,
-            test: i64,
-            exchnage: String
-        },
-        indexes: {
-            test_idx: test,
-            exchnage_idx: exchange
-        }
+            columns: {
+                id: u64 primary_key,
+                test: i64,
+                exchnage: String
+            },
+            indexes: {
+                test_idx: test,
+                exchnage_idx: exchange
+            }
         };
 
         let _ = expand(tokens).unwrap();
