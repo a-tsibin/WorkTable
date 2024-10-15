@@ -10,7 +10,7 @@ use crate::in_memory::space;
 
 pub use data::DATA_INNER_LENGTH;
 pub use link::Link;
-pub use {data::Data, data::ExecutionError as DataExecutionError, data::Hint as DataHint};
+pub use {data::DataPage, data::ExecutionError as DataExecutionError, data::Hint as DataHint};
 
 // TODO: Move to config
 /// The size of a page. Header size and other parts are _included_ in this size.
@@ -144,7 +144,7 @@ mod tests {
     fn general_data_page_valid() {
         let page = page::General {
             header: get_general_header(),
-            inner: page::Data::<()>::new(1.into()),
+            inner: page::DataPage::<()>::new(1.into()),
         };
         let bytes = rkyv::to_bytes::<_, 4096>(&page).unwrap();
 

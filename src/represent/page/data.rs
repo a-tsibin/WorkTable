@@ -15,10 +15,10 @@ use crate::in_memory::page::{self, INNER_PAGE_LENGTH};
 #[cfg(feature = "perf_measurements")]
 use performance_measurement_codegen::performance_measurement;
 
-/// Length of the [`Data`] page header.
+/// Length of the [`DataPage`] page header.
 pub const DATA_HEADER_LENGTH: usize = 4;
 
-/// Length of the inner [`Data`] page part.
+/// Length of the inner [`DataPage`] page part.
 pub const DATA_INNER_LENGTH: usize = INNER_PAGE_LENGTH - DATA_HEADER_LENGTH;
 
 /// Hint can be used to save row size, it `Row` is sized. It can predict how much `Row`s can be saved on page.
@@ -43,15 +43,15 @@ impl Hint {
 }
 
 #[derive(Archive, Deserialize, Debug, Serialize)]
-pub struct Data<Row, const DATA_LENGTH: usize = DATA_INNER_LENGTH> {
-    /// [`Id`] of the [`General`] page of this [`Data`].
+pub struct DataPage<Row, const DATA_LENGTH: usize = DATA_INNER_LENGTH> {
+    /// [`Id`] of the [`General`] page of this [`DataPage`].
     ///
     /// [`Id]: page::Id
     /// [`General`]: page::General
     #[with(Skip)]
     id: page::Id,
 
-    /// Offset to the first free byte on this [`Data`] page.
+    /// Offset to the first free byte on this [`DataPage`] page.
     free_offset: AtomicU32,
 
     /// Inner array of bytes where deserialized `Row`s will be stored.
@@ -62,9 +62,9 @@ pub struct Data<Row, const DATA_LENGTH: usize = DATA_INNER_LENGTH> {
     _phantom: PhantomData<Row>,
 }
 
-unsafe impl<Row, const DATA_LENGTH: usize> Sync for Data<Row, DATA_LENGTH> {}
+unsafe impl<Row, const DATA_LENGTH: usize> Sync for DataPage<Row, DATA_LENGTH> {}
 
-impl<Row, const DATA_LENGTH: usize> From<page::Empty> for Data<Row, DATA_LENGTH> {
+impl<Row, const DATA_LENGTH: usize> From<page::Empty> for DataPage<Row, DATA_LENGTH> {
     fn from(e: page::Empty) -> Self {
         Self {
             id: e.page_id,
@@ -75,8 +75,8 @@ impl<Row, const DATA_LENGTH: usize> From<page::Empty> for Data<Row, DATA_LENGTH>
     }
 }
 
-impl<Row, const DATA_LENGTH: usize> Data<Row, DATA_LENGTH> {
-    /// Creates new [`Data`] page.
+impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
+    /// Creates new [`DataPage`] page.
     pub fn new(id: page::Id) -> Self {
         Self {
             id,
@@ -194,17 +194,17 @@ impl<Row, const DATA_LENGTH: usize> Data<Row, DATA_LENGTH> {
     }
 }
 
-/// Error that can appear on [`Data`] page operations.
+/// Error that can appear on [`DataPage`] page operations.
 #[derive(Copy, Clone, Debug, Display, Error)]
 pub enum ExecutionError {
-    /// Error of trying to save row in [`Data`] page with not enough space left.
+    /// Error of trying to save row in [`DataPage`] page with not enough space left.
     #[display("need {}, but {} left", need, left)]
     PageIsFull { need: u32, left: i64 },
 
-    /// Error of saving `Row` in [`Data`] page.
+    /// Error of saving `Row` in [`DataPage`] page.
     SerializeError,
 
-    /// Error of loading `Row` from [`Data`] page.
+    /// Error of loading `Row` from [`DataPage`] page.
     DeserializeError,
 
     /// Link provided for saving `Row` is invalid.
@@ -219,7 +219,7 @@ mod tests {
 
     use rkyv::{Archive, Deserialize, Serialize};
 
-    use crate::in_memory::page::data::{Data, INNER_PAGE_LENGTH};
+    use crate::in_memory::page::data::{DataPage, INNER_PAGE_LENGTH};
 
     #[derive(
         Archive, Copy, Clone, Deserialize, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn data_page_length_valid() {
-        let data = Data::<()>::new(1.into());
+        let data = DataPage::<()>::new(1.into());
         let bytes = rkyv::to_bytes::<_, 4096>(&data).unwrap();
 
         assert_eq!(bytes.len(), INNER_PAGE_LENGTH)
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn data_page_save_row() {
-        let page = Data::<TestRow>::new(1.into());
+        let page = DataPage::<TestRow>::new(1.into());
         let row = TestRow { a: 10, b: 20 };
 
         let link = page.save_row::<16>(&row).unwrap();
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn data_page_overwrite_row() {
-        let page = Data::<TestRow>::new(1.into());
+        let page = DataPage::<TestRow>::new(1.into());
         let row = TestRow { a: 10, b: 20 };
 
         let link = page.save_row::<16>(&row).unwrap();
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn data_page_full() {
-        let page = Data::<TestRow, 16>::new(1.into());
+        let page = DataPage::<TestRow, 16>::new(1.into());
         let row = TestRow { a: 10, b: 20 };
         let _ = page.save_row::<16>(&row).unwrap();
 
@@ -289,7 +289,7 @@ mod tests {
 
     #[test]
     fn data_page_full_multithread() {
-        let page = Data::<TestRow, 128>::new(1.into());
+        let page = DataPage::<TestRow, 128>::new(1.into());
         let shared = Arc::new(page);
 
         let (tx, rx) = mpsc::channel();
@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn data_page_save_many_rows() {
-        let page = Data::<TestRow>::new(1.into());
+        let page = DataPage::<TestRow>::new(1.into());
 
         let mut rows = Vec::new();
         let mut links = Vec::new();
@@ -358,7 +358,7 @@ mod tests {
 
     #[test]
     fn data_page_get_row_ref() {
-        let page = Data::<TestRow>::new(1.into());
+        let page = DataPage::<TestRow>::new(1.into());
         let row = TestRow { a: 10, b: 20 };
 
         let link = page.save_row::<16>(&row).unwrap();
@@ -368,7 +368,7 @@ mod tests {
 
     #[test]
     fn data_page_get_row() {
-        let page = Data::<TestRow>::new(1.into());
+        let page = DataPage::<TestRow>::new(1.into());
         let row = TestRow { a: 10, b: 20 };
 
         let link = page.save_row::<16>(&row).unwrap();
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn multithread() {
-        let page = Data::<TestRow>::new(1.into());
+        let page = DataPage::<TestRow>::new(1.into());
         let shared = Arc::new(page);
 
         let (tx, rx) = mpsc::channel();

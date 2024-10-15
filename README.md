@@ -5,7 +5,7 @@
 WorkTable macro for generating type alias and row type.
 
 ```rust
-    worktable! (
+    worktable!(
         name: Test,
         columns: {
             id: u64 primary_key,
@@ -18,10 +18,10 @@ Expanded as:
 
 ```rust
 #[derive(Debug, Clone)]
-    pub struct TestRow {
-        id: u64,
-        test: i64,
-    }
+pub struct TestRow {
+    id: u64,
+    test: i64,
+}
 
 impl worktable::TableRow<u64> for TestRow { fn get_primary_key(&self) -> &u64 { &self.id } }
 
@@ -50,7 +50,7 @@ serialization and deserialization).
 ```rust
 struct Page {
     data: [u8; PAGE_SIZE],
-    
+
     info: PageInfo, // Some info about `Page` like it's index etc.
 }
 ```
@@ -60,11 +60,11 @@ To navigate on pages _link_'s can be used.
 ```rust
 struct Link {
     /// Id of the page where data is located.
-    page_id: u64, 
-    
+    page_id: u64,
+
     /// Offset ona page (< PAGE_SIZE, so u16 will be enough up to 64Kb page)
     offset: u16,
-    
+
     /// Length of the data. For rows this will be same, so maybe not used.
     len: u16,
 }
@@ -115,6 +115,7 @@ O(1).
 ## Query macros support.
 
 We need to extend macro usage to minimize client boilerplate code. Example:
+
 ```rust
 {
 worktable!(
@@ -160,14 +161,16 @@ let binance_orders: BidsPriceByDate = price_table.bids_price_by_date(123312341, 
 As inspiration for macro interfaces/design [this crate](https://github.com/helsing-ai/atmosphere) can be used.
 It contains derive macro implementation, but it's still usable for our case.
 
-
-
 ## Persistence support.
 
 Next step after in-memory storage we need to add persistence support.
 
 For starting point we can use [mmap-sync](https://github.com/cloudflare/mmap-sync/tree/main) which has mapped files
 implementation and read/write interface. We will need pages reader/writer for our storage engine.
+
+### TODO
+
+- [ ] migrate data.rs and other types to innodb-rs. otherwise the pages aren't aligned well and can cause trouble
 
 ### Data container format
 
@@ -207,6 +210,7 @@ Total header length is `18 bytes`.
 * Page data is just pages internal data.
 
 Comparison with original InnoDB:
+
 * No checksum part in header (we don't care about this).
 * No LSN page modification header
 * No flush LSN header
@@ -241,7 +245,8 @@ General `Space` layout:
 +-----------------------+-----------+
 ```
 
-As each `Space` is related to separate `Table`, it must contain this `Table`'s schema to validate data and row structure.
+As each `Space` is related to separate `Table`, it must contain this `Table`'s schema to validate data and row
+structure.
 
 `Space` header:
 
@@ -257,7 +262,8 @@ As each `Space` is related to separate `Table`, it must contain this `Table`'s s
 
 #### Page types
 
-Original InnoDB page [types](https://github.com/Codetector1374/InnoDB_rs/blob/6a153a7185feb31e8a31369c9671c4497f56e1c7/src/innodb/page/mod.rs#L99C3-L99C4)
+Original InnoDB
+page [types](https://github.com/Codetector1374/InnoDB_rs/blob/6a153a7185feb31e8a31369c9671c4497f56e1c7/src/innodb/page/mod.rs#L99C3-L99C4)
 
 ```rust
 #[repr(u16)]
@@ -288,7 +294,8 @@ this io_uring can be used. For this approach we have multiple solutions:
 
 * https://github.com/ringbahn/iou - Interface to Linux's io_uring interface
 * https://github.com/bytedance/monoio - A thread-per-core Rust runtime with io_uring/epoll/kqueue. It's goal is to
-  replace Tokio. They have benchmarks that proves that they are _blazingly_ fast [wow](https://github.com/bytedance/monoio/blob/master/docs/en/benchmark.md).
+  replace Tokio. They have benchmarks that proves that they are _blazingly_
+  fast [wow](https://github.com/bytedance/monoio/blob/master/docs/en/benchmark.md).
 * https://github.com/tokio-rs/io-uring - tokios io-uring raw interface. Is unsafe.
 * https://github.com/tokio-rs/tokio-uring - io-uring in Tokio runtime. Safe.
 * https://github.com/compio-rs/compio - inspired by MonoIO crate. Don't think we rally need this because it's feature is

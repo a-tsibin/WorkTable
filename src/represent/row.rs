@@ -5,7 +5,7 @@ use rkyv::{Archive, Deserialize, Serialize};
 
 /// Common trait for the `Row`s that can be stored on the [`Data`] page.
 ///
-/// [`Data`]: crate::in_memory::page::Data
+/// [`Data`]: crate::in_memory::page::DataPage
 pub trait StorableRow {
     type WrappedRow: Archive + Debug;
 }
@@ -24,11 +24,10 @@ pub trait ArchivedRow {
 /// `Row`.
 #[derive(Archive, Deserialize, Debug, Serialize)]
 pub struct GeneralRow<Inner> {
-    /// Inner generic `Row`.
-    pub inner: Inner,
-
     /// Indicator for deleted rows.
     pub deleted: AtomicBool,
+    /// Inner generic `Row`.
+    pub inner: Inner,
 }
 
 impl<Inner> RowWrapper<Inner> for GeneralRow<Inner> {
@@ -46,7 +45,8 @@ impl<Inner> RowWrapper<Inner> for GeneralRow<Inner> {
 }
 
 impl<Inner> ArchivedRow for ArchivedGeneralRow<Inner>
-where Inner: Archive
+where
+    Inner: Archive,
 {
     fn is_locked(&self) -> Option<u16> {
         None
