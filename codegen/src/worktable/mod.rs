@@ -16,11 +16,8 @@ pub fn expand(input: TokenStream) -> syn::Result<TokenStream> {
     let mut queries = None;
     let mut indexes = None;
 
-    let mut attributes = parser.parse_attributes()?;
-    let name = attributes.remove("name").ok_or(syn::Error::new(
-        proc_macro2::Span::call_site(),
-        "Expected `name` field in declaration",
-    ))?;
+    let name = parser.parse_name()?;
+    let attributes = parser.parse_attributes()?;
     while let Some(ident) = parser.peek_next() {
         match ident.to_string().as_str() {
             "columns" => {

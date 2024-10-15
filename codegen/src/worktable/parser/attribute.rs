@@ -5,7 +5,7 @@ use syn::spanned::Spanned as _;
 
 impl Parser {
     pub fn parse_attributes(&mut self) -> syn::Result<Attributes> {
-        const ATTRS: &[&str] = &["name", "persist"];
+        const ATTRS: &[&str] = &["persist"];
         let mut attributes = Attributes::new();
         loop {
             let Some(ident) = self.input_iter.peek().cloned() else {
