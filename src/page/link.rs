@@ -1,6 +1,5 @@
+use crate::page::PageId;
 use rkyv::{Archive, Deserialize, Serialize};
-
-use crate::represent::page;
 
 pub const LINK_LENGTH: usize = 12;
 
@@ -8,16 +7,15 @@ pub const LINK_LENGTH: usize = 12;
     Archive, Copy, Clone, Deserialize, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
 )]
 pub struct PageLink {
-    pub page_id: page::PageId,
+    pub page_id: PageId,
     pub offset: u32,
     pub length: u32,
 }
-static_assertions::const_assert_eq!(std::mem::size_of::<PageLink>(), LINK_LENGTH);
+static_assertions::const_assert_eq!(size_of::<PageLink>(), LINK_LENGTH);
 
 #[cfg(test)]
 mod tests {
-    use crate::represent::page::link::LINK_LENGTH;
-    use crate::represent::page::PageLink;
+    use crate::page::link::{PageLink, LINK_LENGTH};
 
     #[test]
     fn link_length_valid() {

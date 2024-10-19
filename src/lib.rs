@@ -1,7 +1,7 @@
 mod index;
 pub mod lock;
+pub mod page;
 mod primary_key;
-pub mod represent;
 mod row;
 mod table;
 
@@ -17,12 +17,13 @@ pub use table::*;
 pub use worktable_codegen::worktable;
 
 pub mod prelude {
+    pub use crate::page::link::PageLink;
+    pub use crate::page::row::ArchivedRow;
+    pub use crate::page::row::RowWrapper;
+    pub use crate::page::row::StorableRow;
     pub use crate::primary_key::{PrimaryKeyGenerator, TablePrimaryKey};
-    pub use crate::represent::{ArchivedRow, RowWrapper, StorableRow};
     use crate::table;
-    pub use crate::{
-        lock::Lock, represent::page::PageLink, TableIndex, TableRow, WorkTable, WorkTableError,
-    };
+    pub use crate::{lock::Lock, TableIndex, TableRow, WorkTable, WorkTableError};
     pub use derive_more::{From, Into};
     pub use lockfree::set::Set as LockFreeSet;
     pub use scc::{ebr::Guard, tree_index::TreeIndex};

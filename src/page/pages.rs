@@ -7,9 +7,10 @@ use lockfree::stack::Stack;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::{Archive, Deserialize, Serialize};
 
-use crate::represent::page;
-use crate::represent::page::{DataExecutionError, PageLink, PAGE_BODY_SIZE};
-use crate::represent::row::{RowWrapper, StorableRow};
+use crate::page::data::{DataExecutionError, DataPage, PAGE_BODY_SIZE};
+use crate::page::link::PageLink;
+use crate::page::row::{RowWrapper, StorableRow};
+use crate::page::{data, PageId};
 #[cfg(feature = "perf_measurements")]
 use performance_measurement_codegen::performance_measurement;
 
@@ -19,7 +20,7 @@ where
     Row: StorableRow,
 {
     /// Pages vector. Currently, not lock free.
-    pages: RwLock<Vec<Arc<page::DataPage<<Row as StorableRow>::WrappedRow, DATA_LENGTH>>>>,
+    pages: RwLock<Vec<Arc<DataPage<<Row as StorableRow>::WrappedRow, DATA_LENGTH>>>>,
 
     /// Stack with empty [`PageLink`]s. It stores [`PageLink`]s of rows that was deleted.
     empty_links: Stack<PageLink>,
@@ -39,7 +40,7 @@ where
 {
     pub fn new() -> Self {
         Self {
-            pages: RwLock::new(vec![Arc::new(page::DataPage::new(0.into()))]),
+            pages: RwLock::new(vec![Arc::new(DataPage::new(0.into()))]),
             empty_links: Stack::new(),
             row_count: AtomicU64::new(0),
             last_page_id: AtomicU32::new(0),
@@ -133,7 +134,7 @@ where
         if tried_page == self.current_page.load(Ordering::Relaxed) {
             let index = self.last_page_id.fetch_add(1, Ordering::Relaxed) + 1;
 
-            pages.push(Arc::new(page::DataPage::new(index.into())));
+            pages.push(Arc::new(DataPage::new(index.into())));
             self.current_page.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -231,7 +232,7 @@ where
 pub enum ExecutionError {
     DataPageError(DataExecutionError),
 
-    PageNotFound(#[error(not(source))] page::PageId),
+    PageNotFound(#[error(not(source))] PageId),
 
     Locked,
 }
@@ -244,9 +245,8 @@ mod tests {
     use std::thread;
     use std::time::Instant;
 
-    use crate::represent::pages::DataPages;
-    use crate::represent::row::GeneralRow;
-    use crate::represent::StorableRow;
+    use crate::page::pages::DataPages;
+    use crate::page::row::{GeneralRow, StorableRow};
     use rkyv::{Archive, Deserialize, Serialize};
 
     #[derive(

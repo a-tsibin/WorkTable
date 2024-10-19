@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use scc::TreeIndex;
-
+use crate::page::link::PageLink;
 use crate::prelude::LockFreeSet;
-use crate::represent::page::PageLink;
 use crate::WorkTableError;
+use scc::TreeIndex;
 
 pub trait TableIndex<Row> {
     fn save_row(&self, row: Row, link: PageLink) -> Result<(), WorkTableError>;

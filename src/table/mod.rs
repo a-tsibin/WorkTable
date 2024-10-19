@@ -10,11 +10,12 @@ use scc::ebr::Guard;
 use scc::tree_index::TreeIndex;
 
 use crate::lock::LockMap;
+use crate::page::link::PageLink;
+use crate::page::pages::{DataPages, ExecutionError};
+use crate::page::row::{RowWrapper, StorableRow};
 use crate::primary_key::{PrimaryKeyGenerator, TablePrimaryKey};
-use crate::represent::page::PageLink;
-use crate::represent::{DataPages, RowWrapper, StorableRow};
 use crate::table::attributes::TableAttributes;
-use crate::{represent, TableIndex, TableRow};
+use crate::{TableIndex, TableRow};
 
 #[derive(Debug)]
 pub struct WorkTable<Row, Pk, I = (), PkGen = <Pk as TablePrimaryKey>::Generator>
@@ -118,7 +119,7 @@ pub enum WorkTableError {
     NotFound,
     AlreadyExists,
     SerializeError,
-    PagesError(represent::PagesExecutionError),
+    PagesError(ExecutionError),
 }
 
 #[cfg(test)]

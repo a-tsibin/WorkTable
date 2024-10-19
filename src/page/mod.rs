@@ -1,12 +1,11 @@
-mod data;
-mod link;
-mod r#type;
-
 use derive_more::{Display, From};
 use rkyv::{Archive, Deserialize, Serialize};
 
-pub use link::PageLink;
-pub use {data::DataPage, data::ExecutionError as DataExecutionError, data::PAGE_BODY_SIZE};
+pub mod data;
+pub mod link;
+pub mod pages;
+pub mod row;
+pub mod r#type;
 
 /// Represents page's identifier. Is unique within the table bounds
 #[derive(

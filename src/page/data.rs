@@ -3,11 +3,11 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use crate::prelude::PageLink;
-use crate::represent::page::PageId;
 use derive_more::{Display, Error};
 use innodb::innodb::page::{FIL_HEADER_SIZE, FIL_PAGE_SIZE};
 
+use crate::page::link::PageLink;
+use crate::page::PageId;
 #[cfg(feature = "perf_measurements")]
 use performance_measurement_codegen::performance_measurement;
 use rkyv::ser::serializers::AllocSerializer;
@@ -54,15 +54,15 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         feature = "perf_measurements",
         performance_measurement(prefix_name = "DataRow")
     )]
-    pub fn save_row<const N: usize>(&self, row: &Row) -> Result<PageLink, ExecutionError>
+    pub fn save_row<const N: usize>(&self, row: &Row) -> Result<PageLink, DataExecutionError>
     where
         Row: Archive + Serialize<AllocSerializer<N>>,
     {
-        let bytes = rkyv::to_bytes(row).map_err(|_| ExecutionError::SerializeError)?;
+        let bytes = rkyv::to_bytes(row).map_err(|_| DataExecutionError::SerializeError)?;
         let length = bytes.len() as u32;
         let offset = self.free_offset.fetch_add(length, Ordering::SeqCst);
         if offset > DATA_LENGTH as u32 - length {
-            return Err(ExecutionError::PageIsFull {
+            return Err(DataExecutionError::PageIsFull {
                 need: length,
                 left: DATA_LENGTH as i64 - offset as i64,
             });
@@ -88,14 +88,14 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         &self,
         row: &Row,
         link: PageLink,
-    ) -> Result<PageLink, ExecutionError>
+    ) -> Result<PageLink, DataExecutionError>
     where
         Row: Archive + Serialize<AllocSerializer<N>>,
     {
-        let bytes = rkyv::to_bytes(row).map_err(|_| ExecutionError::SerializeError)?;
+        let bytes = rkyv::to_bytes(row).map_err(|_| DataExecutionError::SerializeError)?;
         let length = bytes.len() as u32;
         if length != link.length {
-            return Err(ExecutionError::InvalidLink);
+            return Err(DataExecutionError::InvalidLink);
         }
 
         let inner_data = unsafe { &mut *self.inner_data.get() };
@@ -108,12 +108,12 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
     pub unsafe fn get_mut_row_ref(
         &self,
         link: PageLink,
-    ) -> Result<Pin<&mut <Row as Archive>::Archived>, ExecutionError>
+    ) -> Result<Pin<&mut <Row as Archive>::Archived>, DataExecutionError>
     where
         Row: Archive,
     {
         if link.offset > self.free_offset.load(Ordering::Relaxed) {
-            return Err(ExecutionError::DeserializeError);
+            return Err(DataExecutionError::DeserializeError);
         }
 
         let inner_data = unsafe { &mut *self.inner_data.get() };
@@ -125,12 +125,15 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         feature = "perf_measurements",
         performance_measurement(prefix_name = "DataRow")
     )]
-    pub fn get_row_ref(&self, link: PageLink) -> Result<&<Row as Archive>::Archived, ExecutionError>
+    pub fn get_row_ref(
+        &self,
+        link: PageLink,
+    ) -> Result<&<Row as Archive>::Archived, DataExecutionError>
     where
         Row: Archive,
     {
         if link.offset > self.free_offset.load(Ordering::Relaxed) {
-            return Err(ExecutionError::DeserializeError);
+            return Err(DataExecutionError::DeserializeError);
         }
 
         let inner_data = unsafe { &*self.inner_data.get() };
@@ -142,7 +145,7 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         feature = "perf_measurements",
         performance_measurement(prefix_name = "DataRow")
     )]
-    pub fn get_row(&self, link: PageLink) -> Result<Row, ExecutionError>
+    pub fn get_row(&self, link: PageLink) -> Result<Row, DataExecutionError>
     where
         Row: Archive,
         <Row as Archive>::Archived: Deserialize<Row, rkyv::de::deserializers::SharedDeserializeMap>,
@@ -151,13 +154,13 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         let mut map = rkyv::de::deserializers::SharedDeserializeMap::new();
         archived
             .deserialize(&mut map)
-            .map_err(|_| ExecutionError::DeserializeError)
+            .map_err(|_| DataExecutionError::DeserializeError)
     }
 }
 
 /// Error that can appear on [`DataPage`] page operations.
 #[derive(Copy, Clone, Debug, Display, Error)]
-pub enum ExecutionError {
+pub enum DataExecutionError {
     /// Error of trying to save row in [`DataPage`] page with not enough space left.
     #[display("need {}, but {} left", need, left)]
     PageIsFull { need: u32, left: i64 },
@@ -178,9 +181,8 @@ mod tests {
     use std::sync::{mpsc, Arc};
     use std::thread;
 
+    use crate::page::data::{DataPage, PAGE_BODY_SIZE};
     use rkyv::{Archive, Deserialize, Serialize};
-
-    use crate::represent::page::data::{DataPage, PAGE_BODY_SIZE};
 
     #[derive(
         Archive, Copy, Clone, Deserialize, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
