@@ -29,9 +29,9 @@ impl Generator {
             })
             .map(|(unique, i, t)| {
                 if unique {
-                    quote! {#i: TreeIndex<#t, Link>}
+                    quote! {#i: TreeIndex<#t, PageLink>}
                 } else {
-                    quote! {#i: TreeIndex<#t, std::sync::Arc<LockFreeSet<Link>>>}
+                    quote! {#i: TreeIndex<#t, std::sync::Arc<LockFreeSet<PageLink>>>}
                 }
             })
             .collect::<Vec<_>>();
@@ -98,13 +98,13 @@ impl Generator {
 
         quote! {
             impl TableIndex<#row_type_name> for #index_type_name {
-                fn save_row(&self, row: #row_type_name, link: Link) -> core::result::Result<(), WorkTableError> {
+                fn save_row(&self, row: #row_type_name, link: PageLink) -> core::result::Result<(), WorkTableError> {
                     #(#save_rows)*
 
                     core::result::Result::Ok(())
                 }
 
-                fn delete_row(&self, row: #row_type_name, link: Link) -> core::result::Result<(), WorkTableError> {
+                fn delete_row(&self, row: #row_type_name, link: PageLink) -> core::result::Result<(), WorkTableError> {
                     #(#delete_rows)*
 
                     core::result::Result::Ok(())
@@ -148,7 +148,7 @@ mod tests {
             generator.index_name.unwrap().to_string(),
             "TestIndex".to_string()
         );
-        assert_eq!(res.to_string(), "# [derive (Debug , Default , Clone)] pub struct TestIndex { test_idx : TreeIndex < u64 , Link > }")
+        assert_eq!(res.to_string(), "# [derive (Debug , Default , Clone)] pub struct TestIndex { test_idx : TreeIndex < u64 , PageLink > }")
     }
 
     #[test]
@@ -176,6 +176,6 @@ mod tests {
 
         let res = generator.gen_impl_def();
 
-        assert_eq!(res.to_string(), "impl TableIndex < TestRow > for TestIndex { fn save_row (& self , row : TestRow , link : Link) { self . test_idx . insert (row . test , link) ; } }")
+        assert_eq!(res.to_string(), "impl TableIndex < TestRow > for TestIndex { fn save_row (& self , row : TestRow , link : PageLink) { self . test_idx . insert (row . test , link) ; } }")
     }
 }

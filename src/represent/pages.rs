@@ -7,22 +7,22 @@ use lockfree::stack::Stack;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::{Archive, Deserialize, Serialize};
 
-use crate::in_memory::page;
-use crate::in_memory::page::{DataExecutionError, Link, DATA_INNER_LENGTH};
-use crate::in_memory::row::{RowWrapper, StorableRow};
+use crate::represent::page;
+use crate::represent::page::{DataExecutionError, PageLink, PAGE_BODY_SIZE};
+use crate::represent::row::{RowWrapper, StorableRow};
 #[cfg(feature = "perf_measurements")]
 use performance_measurement_codegen::performance_measurement;
 
 #[derive(Debug)]
-pub struct DataPages<Row, const DATA_LENGTH: usize = DATA_INNER_LENGTH>
+pub struct DataPages<Row, const DATA_LENGTH: usize = PAGE_BODY_SIZE>
 where
     Row: StorableRow,
 {
     /// Pages vector. Currently, not lock free.
     pages: RwLock<Vec<Arc<page::DataPage<<Row as StorableRow>::WrappedRow, DATA_LENGTH>>>>,
 
-    /// Stack with empty [`Link`]s. It stores [`Link`]s of rows that was deleted.
-    empty_links: Stack<Link>,
+    /// Stack with empty [`PageLink`]s. It stores [`PageLink`]s of rows that was deleted.
+    empty_links: Stack<PageLink>,
     // dirty_page_ids: Stack<u32>,
     /// Count of saved rows.
     row_count: AtomicU64,
@@ -51,7 +51,7 @@ where
         feature = "perf_measurements",
         performance_measurement(prefix_name = "DataPages")
     )]
-    pub fn insert<const N: usize>(&self, row: Row) -> Result<Link, ExecutionError>
+    pub fn insert<const N: usize>(&self, row: Row) -> Result<PageLink, ExecutionError>
     where
         Row: Archive + Serialize<AllocSerializer<N>>,
         <Row as StorableRow>::WrappedRow: Archive + Serialize<AllocSerializer<N>>,
@@ -108,7 +108,7 @@ where
     fn retry_insert<const N: usize>(
         &self,
         general_row: <Row as StorableRow>::WrappedRow,
-    ) -> Result<Link, ExecutionError>
+    ) -> Result<PageLink, ExecutionError>
     where
         Row: Archive + Serialize<AllocSerializer<N>>,
         <Row as StorableRow>::WrappedRow: Archive + Serialize<AllocSerializer<N>>,
@@ -142,7 +142,7 @@ where
         feature = "perf_measurements",
         performance_measurement(prefix_name = "DataPages")
     )]
-    pub fn select(&self, link: Link) -> Result<Row, ExecutionError>
+    pub fn select(&self, link: PageLink) -> Result<Row, ExecutionError>
     where
         Row: Archive,
         <<Row as StorableRow>::WrappedRow as Archive>::Archived: Deserialize<
@@ -162,7 +162,7 @@ where
         feature = "perf_measurements",
         performance_measurement(prefix_name = "DataPages")
     )]
-    pub fn with_ref<Op, Res>(&self, link: Link, op: Op) -> Result<Res, ExecutionError>
+    pub fn with_ref<Op, Res>(&self, link: PageLink, op: Op) -> Result<Res, ExecutionError>
     where
         Row: Archive,
         Op: Fn(&<<Row as StorableRow>::WrappedRow as Archive>::Archived) -> Res,
@@ -184,7 +184,7 @@ where
     )]
     pub unsafe fn with_mut_ref<Op, Res>(
         &self,
-        link: Link,
+        link: PageLink,
         mut op: Op,
     ) -> Result<Res, ExecutionError>
     where
@@ -206,8 +206,8 @@ where
     pub unsafe fn update<const N: usize>(
         &self,
         row: Row,
-        link: Link,
-    ) -> Result<Link, ExecutionError>
+        link: PageLink,
+    ) -> Result<PageLink, ExecutionError>
     where
         Row: Archive + Serialize<AllocSerializer<N>>,
         <Row as StorableRow>::WrappedRow: Archive + Serialize<AllocSerializer<N>>,
@@ -221,7 +221,7 @@ where
             .map_err(ExecutionError::DataPageError)
     }
 
-    pub fn delete(&self, link: Link) -> Result<(), ExecutionError> {
+    pub fn delete(&self, link: PageLink) -> Result<(), ExecutionError> {
         self.empty_links.push(link);
         Ok(())
     }
@@ -231,7 +231,7 @@ where
 pub enum ExecutionError {
     DataPageError(DataExecutionError),
 
-    PageNotFound(#[error(not(source))] page::Id),
+    PageNotFound(#[error(not(source))] page::PageId),
 
     Locked,
 }
@@ -244,9 +244,9 @@ mod tests {
     use std::thread;
     use std::time::Instant;
 
-    use crate::in_memory::pages::DataPages;
-    use crate::in_memory::row::GeneralRow;
-    use crate::in_memory::StorableRow;
+    use crate::represent::pages::DataPages;
+    use crate::represent::row::GeneralRow;
+    use crate::represent::StorableRow;
     use rkyv::{Archive, Deserialize, Serialize};
 
     #[derive(

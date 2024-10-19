@@ -1,9 +1,9 @@
-pub mod in_memory;
 mod index;
+pub mod lock;
 mod primary_key;
+pub mod represent;
 mod row;
 mod table;
-pub mod lock;
 
 // mod ty;
 // mod value;
@@ -17,15 +17,16 @@ pub use table::*;
 pub use worktable_codegen::worktable;
 
 pub mod prelude {
-    pub use crate::in_memory::{RowWrapper, StorableRow, ArchivedRow};
     pub use crate::primary_key::{PrimaryKeyGenerator, TablePrimaryKey};
+    pub use crate::represent::{ArchivedRow, RowWrapper, StorableRow};
+    use crate::table;
     pub use crate::{
-        in_memory::page::Link, TableIndex, TableRow, WorkTable,
-        WorkTableError, lock::Lock
+        lock::Lock, represent::page::PageLink, TableIndex, TableRow, WorkTable, WorkTableError,
     };
-    pub use table::select::{SelectQueryExecutor, SelectQueryBuilder, SelectResult, SelectResultExecutor, Order};
     pub use derive_more::{From, Into};
     pub use lockfree::set::Set as LockFreeSet;
     pub use scc::{ebr::Guard, tree_index::TreeIndex};
-    use crate::table;
+    pub use table::select::{
+        Order, SelectQueryBuilder, SelectQueryExecutor, SelectResult, SelectResultExecutor,
+    };
 }

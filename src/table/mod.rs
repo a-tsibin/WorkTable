@@ -9,12 +9,12 @@ use rkyv::{Archive, Deserialize, Serialize};
 use scc::ebr::Guard;
 use scc::tree_index::TreeIndex;
 
-use crate::in_memory::page::Link;
-use crate::in_memory::{DataPages, RowWrapper, StorableRow};
 use crate::lock::LockMap;
 use crate::primary_key::{PrimaryKeyGenerator, TablePrimaryKey};
+use crate::represent::page::PageLink;
+use crate::represent::{DataPages, RowWrapper, StorableRow};
 use crate::table::attributes::TableAttributes;
-use crate::{in_memory, TableIndex, TableRow};
+use crate::{represent, TableIndex, TableRow};
 
 #[derive(Debug)]
 pub struct WorkTable<Row, Pk, I = (), PkGen = <Pk as TablePrimaryKey>::Generator>
@@ -24,7 +24,7 @@ where
 {
     pub data: DataPages<Row>,
 
-    pub pk_map: TreeIndex<Pk, Link>,
+    pub pk_map: TreeIndex<Pk, PageLink>,
 
     pub indexes: I,
 
@@ -118,7 +118,7 @@ pub enum WorkTableError {
     NotFound,
     AlreadyExists,
     SerializeError,
-    PagesError(in_memory::PagesExecutionError),
+    PagesError(represent::PagesExecutionError),
 }
 
 #[cfg(test)]

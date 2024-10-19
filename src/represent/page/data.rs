@@ -1,62 +1,37 @@
 use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicI32, AtomicU16, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
+use crate::prelude::PageLink;
+use crate::represent::page::PageId;
 use derive_more::{Display, Error};
+use innodb::innodb::page::{FIL_HEADER_SIZE, FIL_PAGE_SIZE};
+
+#[cfg(feature = "perf_measurements")]
+use performance_measurement_codegen::performance_measurement;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::{
     with::{Skip, Unsafe},
     AlignedBytes, Archive, Deserialize, Serialize,
 };
-use smart_default::SmartDefault;
 
-use crate::in_memory::page::{self, INNER_PAGE_LENGTH};
-#[cfg(feature = "perf_measurements")]
-use performance_measurement_codegen::performance_measurement;
-
-/// Length of the [`DataPage`] page header.
-pub const DATA_HEADER_LENGTH: usize = 4;
-
-/// Length of the inner [`DataPage`] page part.
-pub const DATA_INNER_LENGTH: usize = INNER_PAGE_LENGTH - DATA_HEADER_LENGTH;
-
-/// Hint can be used to save row size, it `Row` is sized. It can predict how much `Row`s can be saved on page.
-/// Also, it counts saved rows.
-#[derive(Archive, Deserialize, Debug, Serialize, SmartDefault)]
-pub struct Hint {
-    #[default(_code = "AtomicI32::new(-1)")]
-    row_size: AtomicI32,
-    capacity: AtomicU16,
-    row_length: AtomicU16,
-}
-
-impl Hint {
-    pub fn from_row_size(size: usize) -> Self {
-        let capacity = DATA_INNER_LENGTH / size;
-        Self {
-            row_size: AtomicI32::new(-1),
-            capacity: AtomicU16::new(capacity as u16),
-            row_length: AtomicU16::default(),
-        }
-    }
-}
-
+pub const PAGE_BODY_SIZE: usize = FIL_PAGE_SIZE - FIL_HEADER_SIZE;
 #[derive(Archive, Deserialize, Debug, Serialize)]
-pub struct DataPage<Row, const DATA_LENGTH: usize = DATA_INNER_LENGTH> {
-    /// [`Id`] of the [`General`] page of this [`DataPage`].
+pub struct DataPage<Row, const SIZE: usize = PAGE_BODY_SIZE> {
+    /// [`PageId`] of the [`General`] page of this [`DataPage`].
     ///
     /// [`Id]: page::Id
     /// [`General`]: page::General
     #[with(Skip)]
-    id: page::Id,
+    id: PageId,
 
     /// Offset to the first free byte on this [`DataPage`] page.
     free_offset: AtomicU32,
 
     /// Inner array of bytes where deserialized `Row`s will be stored.
     #[with(Unsafe)]
-    inner_data: UnsafeCell<AlignedBytes<DATA_LENGTH>>,
+    inner_data: UnsafeCell<AlignedBytes<SIZE>>,
 
     /// `Row` phantom data.
     _phantom: PhantomData<Row>,
@@ -64,20 +39,9 @@ pub struct DataPage<Row, const DATA_LENGTH: usize = DATA_INNER_LENGTH> {
 
 unsafe impl<Row, const DATA_LENGTH: usize> Sync for DataPage<Row, DATA_LENGTH> {}
 
-impl<Row, const DATA_LENGTH: usize> From<page::Empty> for DataPage<Row, DATA_LENGTH> {
-    fn from(e: page::Empty) -> Self {
-        Self {
-            id: e.page_id,
-            free_offset: AtomicU32::default(),
-            inner_data: UnsafeCell::default(),
-            _phantom: PhantomData,
-        }
-    }
-}
-
 impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
     /// Creates new [`DataPage`] page.
-    pub fn new(id: page::Id) -> Self {
+    pub fn new(id: PageId) -> Self {
         Self {
             id,
             free_offset: AtomicU32::default(),
@@ -90,7 +54,7 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         feature = "perf_measurements",
         performance_measurement(prefix_name = "DataRow")
     )]
-    pub fn save_row<const N: usize>(&self, row: &Row) -> Result<page::Link, ExecutionError>
+    pub fn save_row<const N: usize>(&self, row: &Row) -> Result<PageLink, ExecutionError>
     where
         Row: Archive + Serialize<AllocSerializer<N>>,
     {
@@ -107,7 +71,7 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         let inner_data = unsafe { &mut *self.inner_data.get() };
         inner_data[offset as usize..][..length as usize].copy_from_slice(bytes.as_slice());
 
-        let link = page::Link {
+        let link = PageLink {
             page_id: self.id,
             offset,
             length,
@@ -123,8 +87,8 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
     pub unsafe fn save_row_by_link<const N: usize>(
         &self,
         row: &Row,
-        link: page::Link,
-    ) -> Result<page::Link, ExecutionError>
+        link: PageLink,
+    ) -> Result<PageLink, ExecutionError>
     where
         Row: Archive + Serialize<AllocSerializer<N>>,
     {
@@ -143,7 +107,7 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
 
     pub unsafe fn get_mut_row_ref(
         &self,
-        link: page::Link,
+        link: PageLink,
     ) -> Result<Pin<&mut <Row as Archive>::Archived>, ExecutionError>
     where
         Row: Archive,
@@ -161,10 +125,7 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         feature = "perf_measurements",
         performance_measurement(prefix_name = "DataRow")
     )]
-    pub fn get_row_ref(
-        &self,
-        link: page::Link,
-    ) -> Result<&<Row as Archive>::Archived, ExecutionError>
+    pub fn get_row_ref(&self, link: PageLink) -> Result<&<Row as Archive>::Archived, ExecutionError>
     where
         Row: Archive,
     {
@@ -181,7 +142,7 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         feature = "perf_measurements",
         performance_measurement(prefix_name = "DataRow")
     )]
-    pub fn get_row(&self, link: page::Link) -> Result<Row, ExecutionError>
+    pub fn get_row(&self, link: PageLink) -> Result<Row, ExecutionError>
     where
         Row: Archive,
         <Row as Archive>::Archived: Deserialize<Row, rkyv::de::deserializers::SharedDeserializeMap>,
@@ -219,7 +180,7 @@ mod tests {
 
     use rkyv::{Archive, Deserialize, Serialize};
 
-    use crate::in_memory::page::data::{DataPage, INNER_PAGE_LENGTH};
+    use crate::represent::page::data::{DataPage, PAGE_BODY_SIZE};
 
     #[derive(
         Archive, Copy, Clone, Deserialize, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
@@ -236,7 +197,7 @@ mod tests {
         let data = DataPage::<()>::new(1.into());
         let bytes = rkyv::to_bytes::<_, 4096>(&data).unwrap();
 
-        assert_eq!(bytes.len(), INNER_PAGE_LENGTH)
+        assert_eq!(bytes.len(), PAGE_BODY_SIZE)
     }
 
     #[test]
