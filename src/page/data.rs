@@ -29,6 +29,8 @@ pub struct DataPage<Row, const SIZE: usize = PAGE_BODY_SIZE> {
     /// Offset to the first free byte on this [`DataPage`] page.
     free_offset: AtomicU32,
 
+    // TODO: use LobData here
+    // TODO: make LobData not an reference
     /// Inner array of bytes where deserialized `Row`s will be stored.
     #[with(Unsafe)]
     inner_data: UnsafeCell<AlignedBytes<SIZE>>,
