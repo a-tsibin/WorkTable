@@ -2,25 +2,24 @@ use std::fmt::Debug;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
+use crate::page::data::{DataExecutionError, DataPage};
+use crate::page::link::PageLink;
+use crate::page::row::{RowWrapper, StorableRow};
 use derive_more::{Display, Error, From};
+use innodb::page::PageId;
 use lockfree::stack::Stack;
 use rkyv::ser::serializers::AllocSerializer;
 use rkyv::{Archive, Deserialize, Serialize};
 
-use crate::page::data::{DataExecutionError, DataPage, PAGE_BODY_SIZE};
-use crate::page::link::PageLink;
-use crate::page::row::{RowWrapper, StorableRow};
-use crate::page::PageId;
 #[cfg(feature = "perf_measurements")]
 use performance_measurement_codegen::performance_measurement;
 
-#[derive(Debug)]
-pub struct DataPager<Row, const DATA_LENGTH: usize = PAGE_BODY_SIZE>
+pub struct DataPager<Row>
 where
     Row: StorableRow,
 {
     /// Pages vector. Currently, not lock free.
-    pages: RwLock<Vec<Arc<DataPage<<Row as StorableRow>::WrappedRow, DATA_LENGTH>>>>,
+    pages: RwLock<Vec<Arc<RwLock<DataPage<<Row as StorableRow>::WrappedRow>>>>>,
 
     /// Stack with empty [`PageLink`]s. It stores [`PageLink`]s of rows that was deleted.
     empty_links: Stack<PageLink>,
@@ -33,14 +32,14 @@ where
     current_page: AtomicU32,
 }
 
-impl<Row, const DATA_LENGTH: usize> DataPager<Row, DATA_LENGTH>
+impl<Row> DataPager<Row>
 where
     Row: StorableRow,
     <Row as StorableRow>::WrappedRow: RowWrapper<Row>,
 {
     pub fn new() -> Self {
         Self {
-            pages: RwLock::new(vec![Arc::new(DataPage::new(0.into()))]),
+            pages: RwLock::new(vec![Arc::new(RwLock::new(DataPage::new(PageId(0))))]),
             empty_links: Stack::new(),
             row_count: AtomicU64::new(0),
             last_page_id: AtomicU32::new(0),
@@ -64,7 +63,9 @@ where
             let current_page: usize = link.page_id.into();
             let page = &pages[current_page];
 
-            return if let Err(e) = unsafe { page.save_row_by_link(&general_row, link) } {
+            return if let Err(e) =
+                unsafe { page.write().unwrap().save_row_by_link(&general_row, link) }
+            {
                 match e {
                     DataExecutionError::InvalidLink => {
                         self.empty_links.push(link);
@@ -84,7 +85,11 @@ where
             let current_page = self.current_page.load(Ordering::Relaxed);
             let page = &pages[current_page as usize];
 
-            (page.save_row::<N>(&general_row), current_page)
+            let x = (
+                page.write().unwrap().save_row::<N>(&general_row),
+                current_page,
+            );
+            x
         };
         let res = match link {
             Ok(link) => {
@@ -119,6 +124,8 @@ where
         let page = &pages[current_page as usize];
 
         let res = page
+            .write()
+            .unwrap()
             .save_row::<N>(&general_row)
             .map_err(ExecutionError::DataPageError);
         if let Ok(link) = res {
@@ -134,7 +141,7 @@ where
         if tried_page == self.current_page.load(Ordering::Relaxed) {
             let index = self.last_page_id.fetch_add(1, Ordering::Relaxed) + 1;
 
-            pages.push(Arc::new(DataPage::new(index.into())));
+            pages.push(Arc::new(RwLock::new(DataPage::new(index.into()))));
             self.current_page.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -155,7 +162,11 @@ where
         let page = pages
             .get::<usize>(link.page_id.into())
             .ok_or(ExecutionError::PageNotFound(link.page_id))?;
-        let gen_row = page.get_row(link).map_err(ExecutionError::DataPageError)?;
+        let gen_row = page
+            .read()
+            .unwrap()
+            .get_row(link)
+            .map_err(ExecutionError::DataPageError)?;
         Ok(gen_row.get_inner())
     }
 
@@ -172,7 +183,8 @@ where
         let page = pages
             .get::<usize>(link.page_id.into())
             .ok_or(ExecutionError::PageNotFound(link.page_id))?;
-        let gen_row = page
+        let binding = page.read().unwrap();
+        let gen_row = binding
             .get_row_ref(link)
             .map_err(ExecutionError::DataPageError)?;
         let res = op(gen_row);
@@ -196,7 +208,8 @@ where
         let page = pages
             .get::<usize>(link.page_id.into())
             .ok_or(ExecutionError::PageNotFound(link.page_id))?;
-        let gen_row = page
+        let mut binding = page.write().unwrap();
+        let gen_row = binding
             .get_mut_row_ref(link)
             .map_err(ExecutionError::DataPageError)?
             .get_unchecked_mut();
@@ -218,8 +231,12 @@ where
             .get::<usize>(link.page_id.into())
             .ok_or(ExecutionError::PageNotFound(link.page_id))?;
         let gen_row = <Row as StorableRow>::WrappedRow::from_inner(row);
-        page.save_row_by_link(&gen_row, link)
-            .map_err(ExecutionError::DataPageError)
+        let x = page
+            .write()
+            .unwrap()
+            .save_row_by_link(&gen_row, link)
+            .map_err(ExecutionError::DataPageError);
+        x
     }
 
     pub fn delete(&self, link: PageLink) -> Result<(), ExecutionError> {
@@ -317,7 +334,7 @@ mod tests {
 
     #[test]
     fn insert_full() {
-        let pages = DataPager::<TestRow, 24>::new();
+        let pages = DataPager::<TestRow>::new();
 
         let row = TestRow { a: 10, b: 20 };
         let _ = pages.insert::<16>(row).unwrap();

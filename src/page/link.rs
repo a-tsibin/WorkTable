@@ -1,4 +1,4 @@
-use crate::page::PageId;
+use innodb::page::PageId;
 use rkyv::{Archive, Deserialize, Serialize};
 
 pub const LINK_LENGTH: usize = 12;

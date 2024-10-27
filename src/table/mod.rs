@@ -17,7 +17,6 @@ use crate::primary_key::{PrimaryKeyGenerator, TablePrimaryKey};
 use crate::table::attributes::TableAttributes;
 use crate::{TableIndex, TableRow};
 
-#[derive(Debug)]
 pub struct WorkTable<Row, Pk, I = (), PkGen = <Pk as TablePrimaryKey>::Generator>
 where
     Pk: Clone + Ord + 'static,

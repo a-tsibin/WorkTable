@@ -1,55 +1,31 @@
-use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU32, Ordering};
 
 use derive_more::{Display, Error};
-use innodb::innodb::page::{Page, FIL_HEADER_SIZE, FIL_PAGE_SIZE};
 
 use crate::page::link::PageLink;
-use crate::page::PageId;
-use innodb::innodb::page::lob::data_page::{LobData, LobDataHeader};
-use innodb::innodb::page::PageType::LobData;
+
+use innodb::page::{PageId, PAGE_SIZE};
 #[cfg(feature = "perf_measurements")]
 use performance_measurement_codegen::performance_measurement;
 use rkyv::ser::serializers::AllocSerializer;
-use rkyv::ser::Serializer;
-use rkyv::{
-    with::{Skip, Unsafe},
-    AlignedBytes, Archive, Deserialize, Serialize,
-};
+use rkyv::{Archive, Deserialize, Serialize};
 
-pub const PAGE_BODY_SIZE: usize = FIL_PAGE_SIZE - FIL_HEADER_SIZE;
-#[derive(Archive, Deserialize, Debug, Serialize)]
-pub struct DataPage<Row, const SIZE: usize = PAGE_BODY_SIZE> {
-    /// [`PageId`] of the [`General`] page of this [`DataPage`].
-    ///
-    /// [`Id]: page::Id
-    /// [`General`]: page::General
-    #[with(Skip)]
-    id: PageId,
-
-    /// Offset to the first free byte on this [`DataPage`] page.
-    free_offset: AtomicU32,
-
-    /// Inner array of bytes where deserialized `Row`s will be stored.
-    #[with(Unsafe)]
-    inner_data: UnsafeCell<AlignedBytes<SIZE>>,
-
-    /// `Row` phantom data.
-    _phantom: PhantomData<Row>,
+pub struct DataPage<Row> {
+    page: innodb::page::data::DataPage,
+    phantom: PhantomData<Row>,
 }
 
-unsafe impl<Row, const DATA_LENGTH: usize> Sync for DataPage<Row, DATA_LENGTH> {}
+unsafe impl<Row> Sync for DataPage<Row> {}
 
-impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
+impl<Row> DataPage<Row> {
     /// Creates new [`DataPage`] page.
     pub fn new(id: PageId) -> Self {
+        let mut page = innodb::page::data::DataPage::new();
+        page.header_mut().page_id = id;
         Self {
-            id,
-            free_offset: AtomicU32::default(),
-            inner_data: UnsafeCell::default(),
-            _phantom: PhantomData,
+            page,
+            phantom: Default::default(),
         }
     }
 
@@ -57,25 +33,27 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         feature = "perf_measurements",
         performance_measurement(prefix_name = "DataRow")
     )]
-    pub fn save_row<const N: usize>(&self, row: &Row) -> Result<PageLink, DataExecutionError>
+    pub fn save_row<const N: usize>(&mut self, row: &Row) -> Result<PageLink, DataExecutionError>
     where
         Row: Archive + Serialize<AllocSerializer<N>>,
     {
         let bytes = rkyv::to_bytes(row).map_err(|_| DataExecutionError::SerializeError)?;
         let length = bytes.len() as u32;
-        let offset = self.free_offset.fetch_add(length, Ordering::SeqCst);
-        if offset > DATA_LENGTH as u32 - length {
+        let offset = &mut self.page.data_header_mut().offset;
+        if *offset > PAGE_SIZE as _ {
             return Err(DataExecutionError::PageIsFull {
                 need: length,
-                left: DATA_LENGTH as i64 - offset as i64,
+                left: PAGE_SIZE as i64 - *offset as i64,
             });
         }
+        *offset += length;
+        let offset = *offset;
 
-        let inner_data = unsafe { &mut *self.inner_data.get() };
+        let inner_data = self.page.body_mut();
         inner_data[offset as usize..][..length as usize].copy_from_slice(bytes.as_slice());
 
         let link = PageLink {
-            page_id: self.id,
+            page_id: self.page.header().page_id,
             offset,
             length,
         };
@@ -88,7 +66,7 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         performance_measurement(prefix_name = "DataRow")
     )]
     pub unsafe fn save_row_by_link<const N: usize>(
-        &self,
+        &mut self,
         row: &Row,
         link: PageLink,
     ) -> Result<PageLink, DataExecutionError>
@@ -101,7 +79,7 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
             return Err(DataExecutionError::InvalidLink);
         }
 
-        let inner_data = unsafe { &mut *self.inner_data.get() };
+        let inner_data = self.page.body_mut();
         inner_data[link.offset as usize..][..link.length as usize]
             .copy_from_slice(bytes.as_slice());
 
@@ -109,17 +87,17 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
     }
 
     pub unsafe fn get_mut_row_ref(
-        &self,
+        &mut self,
         link: PageLink,
     ) -> Result<Pin<&mut <Row as Archive>::Archived>, DataExecutionError>
     where
         Row: Archive,
     {
-        if link.offset > self.free_offset.load(Ordering::Relaxed) {
+        if link.offset > self.page.data_header().offset {
             return Err(DataExecutionError::DeserializeError);
         }
 
-        let inner_data = unsafe { &mut *self.inner_data.get() };
+        let inner_data = self.page.body_mut();
         let bytes = &mut inner_data[link.offset as usize..(link.offset + link.length) as usize];
         Ok(unsafe { rkyv::archived_root_mut::<Row>(Pin::new(&mut bytes[..])) })
     }
@@ -135,11 +113,11 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
     where
         Row: Archive,
     {
-        if link.offset > self.free_offset.load(Ordering::Relaxed) {
+        if link.offset > self.page.data_header().offset {
             return Err(DataExecutionError::DeserializeError);
         }
 
-        let inner_data = unsafe { &*self.inner_data.get() };
+        let inner_data = self.page.body();
         let bytes = &inner_data[link.offset as usize..(link.offset + link.length) as usize];
         Ok(unsafe { rkyv::archived_root::<Row>(&bytes[..]) })
     }
@@ -158,13 +136,6 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         archived
             .deserialize(&mut map)
             .map_err(|_| DataExecutionError::DeserializeError)
-    }
-    pub fn to_lob_data(&self, buf: &mut [u8]) -> LobData {
-        rkyv::ser::serializers::BufferSerializer::new(buf)
-            .serialize_value(self)
-            .unwrap();
-        let page = Page::from_bytes(buf).unwrap();
-        LobData::try_from_page(&page).unwrap()
     }
 }
 
@@ -191,7 +162,7 @@ mod tests {
     use std::sync::{mpsc, Arc};
     use std::thread;
 
-    use crate::page::data::{DataPage, PAGE_BODY_SIZE};
+    use crate::page::data::DataPage;
     use rkyv::{Archive, Deserialize, Serialize};
 
     #[derive(
@@ -205,26 +176,18 @@ mod tests {
     }
 
     #[test]
-    fn data_page_length_valid() {
-        let data = DataPage::<()>::new(1.into());
-        let bytes = rkyv::to_bytes::<_, 4096>(&data).unwrap();
-
-        assert_eq!(bytes.len(), PAGE_BODY_SIZE)
-    }
-
-    #[test]
     fn data_page_save_row() {
-        let page = DataPage::<TestRow>::new(1.into());
+        let mut page = DataPage::<TestRow>::new(1.into());
         let row = TestRow { a: 10, b: 20 };
 
         let link = page.save_row::<16>(&row).unwrap();
-        assert_eq!(link.page_id, page.id);
+        assert_eq!(link.page_id, page.page.page_id());
         assert_eq!(link.length, 16);
         assert_eq!(link.offset, 0);
 
-        assert_eq!(page.free_offset.load(Ordering::Relaxed), link.length);
+        assert_eq!(page.page.data_header().offset, link.length);
 
-        let inner_data = unsafe { &mut *page.inner_data.get() };
+        let inner_data = page.page.body();
         let bytes = &inner_data[link.offset as usize..link.length as usize];
         let archived = unsafe { rkyv::archived_root::<TestRow>(bytes) };
         assert_eq!(archived, &row)
@@ -232,7 +195,7 @@ mod tests {
 
     #[test]
     fn data_page_overwrite_row() {
-        let page = DataPage::<TestRow>::new(1.into());
+        let mut page = DataPage::<TestRow>::new(1.into());
         let row = TestRow { a: 10, b: 20 };
 
         let link = page.save_row::<16>(&row).unwrap();
@@ -242,7 +205,7 @@ mod tests {
 
         assert_eq!(res, link);
 
-        let inner_data = unsafe { &mut *page.inner_data.get() };
+        let inner_data = page.page.body();
         let bytes = &inner_data[link.offset as usize..link.length as usize];
         let archived = unsafe { rkyv::archived_root::<TestRow>(bytes) };
         assert_eq!(archived, &new_row)
@@ -250,7 +213,7 @@ mod tests {
 
     #[test]
     fn data_page_full() {
-        let page = DataPage::<TestRow, 16>::new(1.into());
+        let mut page = DataPage::<TestRow>::new(1.into());
         let row = TestRow { a: 10, b: 20 };
         let _ = page.save_row::<16>(&row).unwrap();
 
@@ -262,11 +225,11 @@ mod tests {
 
     #[test]
     fn data_page_full_multithread() {
-        let page = DataPage::<TestRow, 128>::new(1.into());
-        let shared = Arc::new(page);
+        let page = DataPage::<TestRow>::new(1.into());
+        let mut shared = Arc::new(page);
 
         let (tx, rx) = mpsc::channel();
-        let second_shared = shared.clone();
+        let mut second_shared = shared.clone();
 
         thread::spawn(move || {
             let mut links = Vec::new();
@@ -301,7 +264,7 @@ mod tests {
 
     #[test]
     fn data_page_save_many_rows() {
-        let page = DataPage::<TestRow>::new(1.into());
+        let mut page = DataPage::<TestRow>::new(1.into());
 
         let mut rows = Vec::new();
         let mut links = Vec::new();
@@ -316,7 +279,7 @@ mod tests {
             links.push(link)
         }
 
-        let inner_data = unsafe { &mut *page.inner_data.get() };
+        let inner_data = page.page.body();
 
         for (i, link) in links.into_iter().enumerate() {
             let link = link.unwrap();
@@ -331,7 +294,7 @@ mod tests {
 
     #[test]
     fn data_page_get_row_ref() {
-        let page = DataPage::<TestRow>::new(1.into());
+        let mut page = DataPage::<TestRow>::new(1.into());
         let row = TestRow { a: 10, b: 20 };
 
         let link = page.save_row::<16>(&row).unwrap();
@@ -341,7 +304,7 @@ mod tests {
 
     #[test]
     fn data_page_get_row() {
-        let page = DataPage::<TestRow>::new(1.into());
+        let mut page = DataPage::<TestRow>::new(1.into());
         let row = TestRow { a: 10, b: 20 };
 
         let link = page.save_row::<16>(&row).unwrap();
@@ -352,7 +315,7 @@ mod tests {
     #[test]
     fn multithread() {
         let page = DataPage::<TestRow>::new(1.into());
-        let shared = Arc::new(page);
+        let mut shared = Arc::new(page);
 
         let (tx, rx) = mpsc::channel();
         let second_shared = shared.clone();
