@@ -4,13 +4,16 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use derive_more::{Display, Error};
-use innodb::innodb::page::{FIL_HEADER_SIZE, FIL_PAGE_SIZE};
+use innodb::innodb::page::{Page, FIL_HEADER_SIZE, FIL_PAGE_SIZE};
 
 use crate::page::link::PageLink;
 use crate::page::PageId;
+use innodb::innodb::page::lob::data_page::{LobData, LobDataHeader};
+use innodb::innodb::page::PageType::LobData;
 #[cfg(feature = "perf_measurements")]
 use performance_measurement_codegen::performance_measurement;
 use rkyv::ser::serializers::AllocSerializer;
+use rkyv::ser::Serializer;
 use rkyv::{
     with::{Skip, Unsafe},
     AlignedBytes, Archive, Deserialize, Serialize,
@@ -29,8 +32,6 @@ pub struct DataPage<Row, const SIZE: usize = PAGE_BODY_SIZE> {
     /// Offset to the first free byte on this [`DataPage`] page.
     free_offset: AtomicU32,
 
-    // TODO: use LobData here
-    // TODO: make LobData not an reference
     /// Inner array of bytes where deserialized `Row`s will be stored.
     #[with(Unsafe)]
     inner_data: UnsafeCell<AlignedBytes<SIZE>>,
@@ -157,6 +158,13 @@ impl<Row, const DATA_LENGTH: usize> DataPage<Row, DATA_LENGTH> {
         archived
             .deserialize(&mut map)
             .map_err(|_| DataExecutionError::DeserializeError)
+    }
+    pub fn to_lob_data(&self, buf: &mut [u8]) -> LobData {
+        rkyv::ser::serializers::BufferSerializer::new(buf)
+            .serialize_value(self)
+            .unwrap();
+        let page = Page::from_bytes(buf).unwrap();
+        LobData::try_from_page(&page).unwrap()
     }
 }
 

@@ -3,7 +3,7 @@ use rkyv::{Archive, Deserialize, Serialize};
 
 pub mod data;
 pub mod link;
-pub mod pages;
+pub mod pager;
 pub mod row;
 pub mod r#type;
 

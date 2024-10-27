@@ -11,7 +11,7 @@ use scc::tree_index::TreeIndex;
 
 use crate::lock::LockMap;
 use crate::page::link::PageLink;
-use crate::page::pages::{DataPages, ExecutionError};
+use crate::page::pager::{DataPager, ExecutionError};
 use crate::page::row::{RowWrapper, StorableRow};
 use crate::primary_key::{PrimaryKeyGenerator, TablePrimaryKey};
 use crate::table::attributes::TableAttributes;
@@ -23,7 +23,7 @@ where
     Pk: Clone + Ord + 'static,
     Row: StorableRow,
 {
-    pub data: DataPages<Row>,
+    pub data: DataPager<Row>,
 
     pub pk_map: TreeIndex<Pk, PageLink>,
 
@@ -46,7 +46,7 @@ where
 {
     fn default() -> Self {
         Self {
-            data: DataPages::new(),
+            data: DataPager::new(),
             pk_map: TreeIndex::new(),
             indexes: I::default(),
             pk_gen: Default::default(),

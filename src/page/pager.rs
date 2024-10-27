@@ -10,12 +10,12 @@ use rkyv::{Archive, Deserialize, Serialize};
 use crate::page::data::{DataExecutionError, DataPage, PAGE_BODY_SIZE};
 use crate::page::link::PageLink;
 use crate::page::row::{RowWrapper, StorableRow};
-use crate::page::{data, PageId};
+use crate::page::PageId;
 #[cfg(feature = "perf_measurements")]
 use performance_measurement_codegen::performance_measurement;
 
 #[derive(Debug)]
-pub struct DataPages<Row, const DATA_LENGTH: usize = PAGE_BODY_SIZE>
+pub struct DataPager<Row, const DATA_LENGTH: usize = PAGE_BODY_SIZE>
 where
     Row: StorableRow,
 {
@@ -33,7 +33,7 @@ where
     current_page: AtomicU32,
 }
 
-impl<Row, const DATA_LENGTH: usize> DataPages<Row, DATA_LENGTH>
+impl<Row, const DATA_LENGTH: usize> DataPager<Row, DATA_LENGTH>
 where
     Row: StorableRow,
     <Row as StorableRow>::WrappedRow: RowWrapper<Row>,
@@ -245,7 +245,7 @@ mod tests {
     use std::thread;
     use std::time::Instant;
 
-    use crate::page::pages::DataPages;
+    use crate::page::pager::DataPager;
     use crate::page::row::{GeneralRow, StorableRow};
     use rkyv::{Archive, Deserialize, Serialize};
 
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn insert() {
-        let pages = DataPages::<TestRow>::new();
+        let pages = DataPager::<TestRow>::new();
 
         let row = TestRow { a: 10, b: 20 };
         let link = pages.insert::<24>(row).unwrap();
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn select() {
-        let pages = DataPages::<TestRow>::new();
+        let pages = DataPager::<TestRow>::new();
 
         let row = TestRow { a: 10, b: 20 };
         let link = pages.insert::<24>(row).unwrap();
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn update() {
-        let pages = DataPages::<TestRow>::new();
+        let pages = DataPager::<TestRow>::new();
 
         let row = TestRow { a: 10, b: 20 };
         let link = pages.insert::<24>(row).unwrap();
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn delete() {
-        let pages = DataPages::<TestRow>::new();
+        let pages = DataPager::<TestRow>::new();
 
         let row = TestRow { a: 10, b: 20 };
         let link = pages.insert::<24>(row).unwrap();
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn insert_full() {
-        let pages = DataPages::<TestRow, 24>::new();
+        let pages = DataPager::<TestRow, 24>::new();
 
         let row = TestRow { a: 10, b: 20 };
         let _ = pages.insert::<16>(row).unwrap();
@@ -328,7 +328,7 @@ mod tests {
 
     #[test]
     fn bench() {
-        let pages = Arc::new(DataPages::<TestRow>::new());
+        let pages = Arc::new(DataPager::<TestRow>::new());
 
         let mut v = Vec::new();
 
