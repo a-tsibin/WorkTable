@@ -96,6 +96,15 @@ impl<Row, const DATA_LENGTH: usize> Data<Row, DATA_LENGTH> {
     {
         let bytes = rkyv::to_bytes(row).map_err(|_| ExecutionError::SerializeError)?;
         let length = bytes.len() as u32;
+        
+        // Check if the page is full before checking offset
+        if length > DATA_LENGTH as u32 {
+            return Err(ExecutionError::PageIsFull {
+                need: length,
+                left: 0,
+            });
+        }
+        
         let offset = self.free_offset.fetch_add(length, Ordering::SeqCst);
         if offset > DATA_LENGTH as u32 - length {
             return Err(ExecutionError::PageIsFull {
