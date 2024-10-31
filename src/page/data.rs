@@ -5,6 +5,7 @@ use derive_more::{Display, Error};
 
 use crate::page::link::PageLink;
 
+use innodb::page::data::DATA_PAGE_BODY_SIZE;
 use innodb::page::{PageId, PAGE_SIZE};
 #[cfg(feature = "perf_measurements")]
 use performance_measurement_codegen::performance_measurement;
@@ -40,21 +41,21 @@ impl<Row> DataPage<Row> {
         let bytes = rkyv::to_bytes(row).map_err(|_| DataExecutionError::SerializeError)?;
         let length = bytes.len() as u32;
         let offset = &mut self.page.data_header_mut().offset;
-        if *offset > PAGE_SIZE as _ {
+        if *offset + length > DATA_PAGE_BODY_SIZE as _ {
             return Err(DataExecutionError::PageIsFull {
                 need: length,
                 left: PAGE_SIZE as i64 - *offset as i64,
             });
         }
+        let offset0 = *offset;
         *offset += length;
-        let offset = *offset;
 
         let inner_data = self.page.body_mut();
-        inner_data[offset as usize..][..length as usize].copy_from_slice(bytes.as_slice());
+        inner_data[offset0 as usize..][..length as usize].copy_from_slice(bytes.as_slice());
 
         let link = PageLink {
             page_id: self.page.header().page_id,
-            offset,
+            offset: offset0,
             length,
         };
 
@@ -119,7 +120,7 @@ impl<Row> DataPage<Row> {
 
         let inner_data = self.page.body();
         let bytes = &inner_data[link.offset as usize..(link.offset + link.length) as usize];
-        Ok(unsafe { rkyv::archived_root::<Row>(&bytes[..]) })
+        Ok(unsafe { rkyv::archived_root::<Row>(bytes) })
     }
 
     #[cfg_attr(
@@ -158,11 +159,11 @@ pub enum DataExecutionError {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
-    use std::sync::{mpsc, Arc};
+    use std::sync::{mpsc, Arc, Mutex};
     use std::thread;
 
     use crate::page::data::DataPage;
+    use innodb::page::data::DATA_PAGE_BODY_SIZE;
     use rkyv::{Archive, Deserialize, Serialize};
 
     #[derive(
@@ -214,6 +215,7 @@ mod tests {
     #[test]
     fn data_page_full() {
         let mut page = DataPage::<TestRow>::new(1.into());
+        page.page.data_header_mut().offset = DATA_PAGE_BODY_SIZE as u32 - 16;
         let row = TestRow { a: 10, b: 20 };
         let _ = page.save_row::<16>(&row).unwrap();
 
@@ -226,10 +228,10 @@ mod tests {
     #[test]
     fn data_page_full_multithread() {
         let page = DataPage::<TestRow>::new(1.into());
-        let mut shared = Arc::new(page);
+        let shared = Arc::new(Mutex::new(page));
 
         let (tx, rx) = mpsc::channel();
-        let mut second_shared = shared.clone();
+        let second_shared = shared.clone();
 
         thread::spawn(move || {
             let mut links = Vec::new();
@@ -239,7 +241,7 @@ mod tests {
                     b: 20 + i,
                 };
 
-                let link = second_shared.save_row::<16>(&row);
+                let link = second_shared.lock().unwrap().save_row::<16>(&row);
                 links.push(link)
             }
 
@@ -253,7 +255,7 @@ mod tests {
                 b: 40 + i,
             };
 
-            let link = shared.save_row::<16>(&row);
+            let link = shared.lock().unwrap().save_row::<16>(&row);
             links.push(link)
         }
         let other_links = rx.recv().unwrap();
@@ -315,7 +317,7 @@ mod tests {
     #[test]
     fn multithread() {
         let page = DataPage::<TestRow>::new(1.into());
-        let mut shared = Arc::new(page);
+        let shared = Arc::new(Mutex::new(page));
 
         let (tx, rx) = mpsc::channel();
         let second_shared = shared.clone();
@@ -328,7 +330,7 @@ mod tests {
                     b: 20 + i,
                 };
 
-                let link = second_shared.save_row::<16>(&row);
+                let link = second_shared.lock().unwrap().save_row::<16>(&row);
                 links.push(link)
             }
 
@@ -342,7 +344,7 @@ mod tests {
                 b: 40 + i,
             };
 
-            let link = shared.save_row::<16>(&row);
+            let link = shared.lock().unwrap().save_row::<16>(&row);
             links.push(link)
         }
         let other_links = rx.recv().unwrap();
@@ -354,7 +356,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         for link in links {
-            let _ = shared.get_row(link).unwrap();
+            let _ = shared.lock().unwrap().get_row(link).unwrap();
         }
     }
 }

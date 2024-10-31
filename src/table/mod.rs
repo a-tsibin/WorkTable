@@ -8,6 +8,7 @@ use rkyv::ser::serializers::AllocSerializer;
 use rkyv::{Archive, Deserialize, Serialize};
 use scc::ebr::Guard;
 use scc::tree_index::TreeIndex;
+use std::fmt::Debug;
 
 use crate::lock::LockMap;
 use crate::page::link::PageLink;
@@ -33,7 +34,26 @@ where
     pub lock_map: LockMap,
     pub attributes: TableAttributes,
 }
-
+impl<Row, Pk, I, PkGen> Debug for WorkTable<Row, Pk, I, PkGen>
+where
+    Pk: Clone + Ord + TablePrimaryKey + Debug,
+    I: Debug,
+    <Pk as TablePrimaryKey>::Generator: Default,
+    Row: StorableRow,
+    <Row as StorableRow>::WrappedRow: RowWrapper<Row>,
+    PkGen: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkTable")
+            .field("data", &self.data)
+            .field("pk_map", &self.pk_map)
+            .field("indexes", &self.indexes)
+            .field("pk_gen", &self.pk_gen)
+            .field("lock_map", &self.lock_map)
+            .field("attributes", &self.attributes)
+            .finish()
+    }
+}
 // Manual implementations to avoid unneeded trait bounds.
 impl<Row, Pk, I> Default for WorkTable<Row, Pk, I>
 where

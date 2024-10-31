@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::{Debug, Formatter};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -31,7 +31,15 @@ where
 
     current_page: AtomicU32,
 }
-
+impl<Row: StorableRow> Debug for DataPager<Row> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DataPager")
+            .field("row_count", &self.row_count)
+            .field("last_page_id", &self.last_page_id)
+            .field("current_page", &self.current_page)
+            .finish()
+    }
+}
 impl<Row> DataPager<Row>
 where
     Row: StorableRow,
